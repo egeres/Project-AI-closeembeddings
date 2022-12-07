@@ -18,6 +18,8 @@ import torchvision.transforms as transforms
 
 # Define the convolutional neural network that takes a [1, 28, 28] image and outputs a [10] vector
 class Net(nn.Module):
+    """Takes MNIST image and outputs a [10,] vector"""
+
     def __init__(self):
         super(Net, self).__init__()
         self.conv1 = nn.Conv2d(1, 6, 5)
@@ -35,6 +37,14 @@ class Net(nn.Module):
         x = F.relu(self.fc2(x))
         x = self.fc3(x)
         return x
+
+class CosineDistance(nn.Module):
+    def __init__(self):
+        super(CosineDistance, self).__init__()
+    
+    def forward(self, x, y):
+        # return 1 - F.cosine_similarity(x, y, dim=1)
+        return 1 - F.cosine_similarity(x, y, dim=1).mean()
 
 if __name__ == '__main__':
         
@@ -77,7 +87,6 @@ if __name__ == '__main__':
         class_pairs[trainset[i][1]].append(i)
         # class_pairs[trainset[i][1]].append(trainset[i][1])
 
-
     positive_examples = []
     for i in range(10):
         for j in range(2000):
@@ -90,10 +99,6 @@ if __name__ == '__main__':
                 if j != k:
                     negative_examples.append((class_pairs[j].popleft(), class_pairs[k].popleft()))
 
-    # Convert each list of tuples of indexes per instance into a tensor
-    # positive_examples = torch.tensor(positive_examples)
-    # negative_examples = torch.tensor(negative_examples)
-
     # Turn each index into an image
     positive_examples_left  = torch.stack([trainset[i[0]][0] for i in positive_examples])
     positive_examples_right = torch.stack([trainset[i[1]][0] for i in positive_examples])
@@ -101,29 +106,69 @@ if __name__ == '__main__':
     negative_examples_right = torch.stack([trainset[i[1]][0] for i in negative_examples])
 
 
-    # neural network takes a [1, 28, 28] image and outputs a [10] vector
-    # train such that the network outputs a high value for the same class and a low value for different classes
+    print("+L", len(positive_examples_left ))
+    print("+R", len(positive_examples_right))
+    print("-L", len(negative_examples_left ))
+    print("-R", len(negative_examples_right))
+
+
+    # Batch the data into 64 chunks
+    positive_examples_left  = positive_examples_left .split(64)
+    positive_examples_right = positive_examples_right.split(64)
+    negative_examples_left  = negative_examples_left .split(64)
+    negative_examples_right = negative_examples_right.split(64)
 
 
 
     p = 0
 
     # Plot a grid
-    def imshow(img):
-        img = img / 2 + 0.5
-        npimg = img.numpy()
-        plt.imshow(np.transpose(npimg, (1, 2, 0)))
-        plt.show()
-    dataiter = iter(trainloader)
-    images, labels = dataiter.next()
-    imshow(torchvision.utils.make_grid(images))
+    if False:
+        def imshow(img):
+            img = img / 2 + 0.5
+            npimg = img.numpy()
+            plt.imshow(np.transpose(npimg, (1, 2, 0)))
+            plt.show()
+        dataiter = iter(trainloader)
+        images, labels = dataiter.next()
+        imshow(torchvision.utils.make_grid(images))
 
 
 
+    # Train
+    net         = Net()
+    optimizer   = optim.Adam(net.parameters(), lr=0.001)
+    criterion_0 = nn.CrossEntropyLoss()
+    criterion_1 = CosineDistance()
 
+    for epoch in range(2):
+        running_loss = 0.0
+        for step, (a, b) in enumerate(zip(positive_examples_left, positive_examples_right)):
+            
+            # Train itself
+            output_a = net(a)
+            output_b = net(b)
+            optimizer.zero_grad()
+            loss = criterion_1(output_a, output_b)
+            loss.backward()
+            optimizer.step()
+            running_loss += loss.item()
 
+            # Print loss
+            if step % 10 == 9:
+                print('[%d, %5d] loss: %.5f' % (epoch + 1, step + 1, running_loss / 100))
+                running_loss = 0.0
 
+    with torch.no_grad():
+        for i in range(10):
+            output_a = net(positive_examples_left [i * 1000 // 64][0].view(-1, 1, 28, 28))
+            output_b = net(positive_examples_right[i * 1000 // 64][0].view(-1, 1, 28, 28))
+            print(criterion_1(output_a, output_b))
+        for i in range(10):
+            output_a = net(negative_examples_left [i][0].view(-1, 1, 28, 28))
+            output_b = net(negative_examples_right[i][0].view(-1, 1, 28, 28))
+            print(criterion_1(output_a, output_b))
 
-
+    p = 0
 
 
